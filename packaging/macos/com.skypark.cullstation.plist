@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- OPTIONAL: auto-start CullStation at login (handy for unattended overnight transcodes).
+       Install:  cp this file to ~/Library/LaunchAgents/  then  launchctl load ~/Library/LaunchAgents/com.skypark.cullstation.plist
+       Remove:   launchctl unload ~/Library/LaunchAgents/com.skypark.cullstation.plist ; rm it -->
+  <key>Label</key>
+  <string>com.skypark.cullstation</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>/Applications/CullStation.app</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>

@@ -1,0 +1,9 @@
+# Build-time dependencies for packaging CullStation.app (macOS, Apple Silicon).
+# build_app.sh installs these into a throwaway .build-venv.
+pyinstaller>=6.0
+rumps>=0.4.0          # menu-bar UI (pulls in pyobjc-core + pyobjc-framework-Cocoa)
+
+# the app's own runtime deps (bundled into the .app):
+fastapi>=0.110
+uvicorn>=0.27
+pillow>=10.0

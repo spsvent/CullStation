@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CullStation — SkyPark</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%97%84%EF%B8%8F</text></svg>">
+<style>
+:root{--bg:#11141a;--card:#1b2027;--ink:#e8edf2;--mut:#8b97a7;--ok:#34d399;--warn:#fbbf24;--bad:#f87171;--acc:#60a5fa;--line:#2a313b}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:1px solid var(--line);background:#0d1015;position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;letter-spacing:.3px}
+.tabs{display:flex;gap:6px;margin-left:8px}
+.tabs button{background:transparent;color:var(--mut);border:0;padding:8px 13px;border-radius:8px;cursor:pointer;font-size:14px}
+.tabs button.on{background:var(--card);color:var(--ink)}
+.pill{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:12px;color:var(--mut)}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:middle}
+#banner{display:none;background:#3a1d22;color:#fecaca;border-bottom:1px solid #5b2730;padding:8px 20px;font-size:13px}
+#banner.on{display:block}
+main{padding:20px;max-width:1240px;margin:0 auto}
+.grid{display:grid;gap:14px}.cards{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px}
+.card .k{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+.card .v{font-size:25px;font-weight:600;margin-top:6px}
+.bar{height:10px;border-radius:6px;background:#222a34;overflow:hidden;margin-top:10px}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#34d399);width:0;transition:width .4s}
+.gauge>i{background:linear-gradient(90deg,#f87171,#fbbf24,#34d399)}
+h2{font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px;margin:24px 0 12px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+select,input{background:#222a34;color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13px}
+button.act{background:var(--acc);color:#06121f;border:0;border-radius:8px;padding:8px 14px;font-weight:600;cursor:pointer}
+button.ghost{background:#222a34;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer}
+.seg{display:inline-flex;gap:4px;background:#161b22;border:1px solid var(--line);border-radius:9px;padding:3px}
+.seg button{background:transparent;color:var(--mut);border:0;padding:6px 11px;border-radius:7px;cursor:pointer;font-size:13px;white-space:nowrap}
+.seg button.on{background:var(--acc);color:#06121f;font-weight:600}
+.ph.leaving{opacity:0;transform:scale(.96);transition:opacity .18s,transform .18s;pointer-events:none}
+button.danger{background:#7f1d1d;color:#fee2e2}
+.muted{color:var(--mut)}.small{font-size:12px}
+.photos{grid-template-columns:repeat(auto-fill,minmax(225px,1fr))}
+.ph{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.ph.focus{outline:2px solid var(--acc)}
+.ph img{width:100%;height:225px;object-fit:cover;background:#000;cursor:zoom-in}
+.ph .meta{padding:7px 9px;font-size:12px;color:var(--mut);word-break:break-word}
+.ph .meta b{color:var(--ink)}
+.ph .btns{display:flex;border-top:1px solid var(--line)}
+.ph .btns button{flex:1;border:0;padding:9px;cursor:pointer;background:transparent;color:var(--mut);font-size:13px}
+.ph .btns button:hover{background:#222a34;color:var(--ink)}
+.ph[data-decision=approve]{outline:2px solid var(--ok)}.ph[data-decision=delete]{outline:2px solid #fb923c}.ph[data-decision=manual]{outline:2px solid #a78bfa}.ph[data-decision=reject]{outline:2px solid var(--bad)}
+.ph[data-decision=approve] .ap{color:var(--ok)}.ph[data-decision=delete] .dl{color:#fb923c}.ph[data-decision=manual] .rw{color:#a78bfa}
+.ph .btns .rw,.ph .btns .dl{flex:0 0 38px}
+.lightbox{position:fixed;inset:0;background:#000d;display:none;align-items:center;justify-content:center;z-index:20}
+.lightbox img{max-width:94vw;max-height:94vh}.lightbox.on{display:flex}
+.empty{color:var(--mut);padding:36px;text-align:center}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:500}
+.kbd{font:11px monospace;background:#222a34;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--mut)}
+</style></head>
+<body>
+<header>
+  <h1>🗄️ CullStation</h1>
+  <div class="tabs">
+    <button data-t="overview" class="on">Overview</button>
+    <button data-t="photos">Photo Review</button>
+    <button data-t="deletion">Deletion</button>
+    <button data-t="video">Video</button>
+  </div>
+  <div class="pill"><span id="conn"></span><span id="mounts"></span></div>
+</header>
+<div id="banner"></div>
+<main>
+  <section id="tab-overview">
+    <div class="grid cards" id="ovcards"></div>
+    <h2>Photo conversion</h2><div class="bar"><i id="phbar"></i></div>
+    <div class="muted small" id="phline" style="margin-top:8px"></div>
+    <div class="row" id="convrow" style="margin-top:12px;align-items:center;gap:8px">
+      <label class="muted small">Convert RAW photos from year
+        <input id="convYear" type="number" min="1990" max="2100" style="width:74px"> and older</label>
+      <button class="act" id="convApply">Convert</button>
+      <span class="muted small" id="convStatus"></span>
+    </div>
+    <h2>NAS volume</h2><div class="bar gauge"><i id="nasbar"></i></div>
+    <div class="muted small" id="nasline" style="margin-top:8px"></div>
+  </section>
+
+  <section id="tab-photos" hidden>
+    <div class="row" style="margin-bottom:12px">
+      <h2 style="margin:0">Photo Review</h2>
+      <select id="pstatus"><option>REVIEW</option><option>FAIL</option><option>PASS</option></select>
+      <select id="psort"><option value="corr">sort: confidence ↑</option><option value="date">sort: date</option><option value="folder">sort: folder</option></select>
+      <span class="seg" id="pfilter">
+        <button data-f="pending">Needs input</button>
+        <button data-f="decided">Decided</button>
+        <button data-f="all">All</button>
+      </span>
+      <span class="muted small" id="pcount"></span>
+      <span style="margin-left:auto"></span>
+      <button class="ghost" id="bulkApprove">Approve all shown</button>
+      <button class="ghost" id="reloadPhotos">↻</button>
+    </div>
+    <div class="muted small" style="margin-bottom:10px">Keys: <span class="kbd">A</span> approve · <span class="kbd">R</span> darker · <span class="kbd">M</span> download RAW · <span class="kbd">D</span> delete · <span class="kbd">C</span> clear · <span class="kbd">J</span>/<span class="kbd">K</span> move · <span class="kbd">Enter</span> zoom<br><b>✓ Approve</b>=keep JPEG, delete RAW · <b>↻ Darker</b>=re-develop one stop darker · <b>⬇</b>=download RAW to edit manually (keeps it) · <b>🗑</b>=delete RAW, no JPEG</div>
+    <div class="grid photos" id="photos"></div>
+  </section>
+
+  <section id="tab-deletion" hidden>
+    <h2 style="margin-top:0">Verified delete — reclaim space</h2>
+    <div class="grid cards" id="delcards"></div>
+    <div class="row" style="margin:14px 0">
+      <button class="act" id="stageBtn">Stage all deletable →</button>
+      <span class="muted small">Stages verified+approved originals into a holding folder (recoverable). Frees space only on Purge.</span>
+    </div>
+    <h2>Staged (recoverable)</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost" id="recoverBtn">↩ Recover all</button>
+      <span style="flex:1"></span>
+      <input id="purgeTok" placeholder="type PURGE to confirm" size="20">
+      <button class="danger ghost" id="purgeBtn">Purge (permanent)</button>
+    </div>
+    <div id="stagedWrap" class="muted small"></div>
+  </section>
+
+  <section id="tab-video" hidden>
+    <h2 style="margin-top:0">Video — ProRes → HEVC</h2>
+    <div id="vConfigErr" class="muted" style="color:var(--bad)"></div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="act" onclick="vid('start')">▶ Start</button>
+      <button class="ghost" onclick="vid('pause')">⏸ Pause</button>
+      <button class="ghost" onclick="vid('resume')">⏵ Resume</button>
+      <button class="ghost" onclick="vid('stop')">⏹ Stop</button>
+    </div>
+    <div class="grid cards" id="vcards"></div>
+    <div class="muted small" id="vcur" style="margin:10px 0 4px"></div><div class="bar"><i id="vbar"></i></div>
+    <h2>Settings</h2>
+    <div class="row">
+      <label>Quality <select id="vQual">
+        <option value="high">High quality (larger files)</option>
+        <option value="balanced">Balanced — recommended</option>
+        <option value="smaller">Smaller files</option>
+      </select></label>
+      <label class="muted small">Only convert videos from <input id="vCutoff" type="number" min="1990" max="2100" style="width:64px"> and older</label>
+      <label><input id="vSched" type="checkbox"> Only run overnight</label>
+      <label class="muted small">from <input id="vStart" type="number" min="0" max="23" style="width:54px"> to <input id="vEnd" type="number" min="0" max="23" style="width:54px"> (24-hour clock)</label>
+      <button class="ghost" id="vSave">Save</button>
+      <span class="muted small" id="vEncInfo" style="margin-left:auto"></span>
+    </div>
+    <h2>Queue — mark clips to <b>keep</b> as full-quality ProRes <button class="ghost small" id="vLoadQ">load</button></h2>
+    <div id="vqueue" class="muted small">not loaded (walks the video tree on demand)</div>
+  </section>
+</main>
+<div class="lightbox" id="lb"><img id="lbimg"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const enc=encodeURIComponent;
+let tab="overview", focusIdx=-1;
+let photoState={status:null, filter:(localStorage.getItem('cull.pfilter')||'pending'), counts:null};
+let photoReloading=false;   // coalesces the auto next-page reload when a page is drained
+let convYearTouched=false;  // don't overwrite the cutoff field while the user is typing in it
+
+// fetch wrapper: adds CSRF header, checks res.ok, surfaces failures
+async function api(path,opts={}){
+  opts.headers=Object.assign({'X-CullStation':'1'},opts.headers||{});
+  const res=await fetch(path,opts);
+  if(!res.ok){let t='';try{t=(await res.json()).detail||''}catch(e){}throw new Error(`${res.status} ${t}`.trim());}
+  const ct=res.headers.get('content-type')||'';return ct.includes('json')?res.json():res.text();
+}
+function banner(msg){const b=$('#banner');if(msg){b.textContent=msg;b.classList.add('on');}else b.classList.remove('on');}
+function card(k,v,sub){return `<div class="card"><div class="k">${esc(k)}</div><div class="v">${v}</div>${sub?`<div class="muted small">${esc(sub)}</div>`:''}</div>`}
+function dot(ok){return `<span class="dot" style="background:${ok?'var(--ok)':'var(--bad)'}"></span>`}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  tab=b.dataset.t;document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  ['overview','photos','deletion','video'].forEach(t=>$('#tab-'+t).hidden=(t!==tab));
+  if(tab==='photos')loadPhotos();
+  if(tab==='deletion')loadDeletion();
+});
+
+async function tick(){
+  if(document.hidden)return;
+  let s;try{s=await api('/api/status')}catch(e){$('#conn').innerHTML=dot(false)+'offline';banner('Backend unreachable — showing last values. '+e.message);return;}
+  banner('');$('#conn').innerHTML=dot(true)+'live';
+  $('#mounts').innerHTML=Object.entries(s.mounts).map(([k,m])=>dot(m.ok)+k).join(' &nbsp; ');
+  const p=s.photos,n=s.nas;
+  $('#ovcards').innerHTML=
+     card('Photos done',(p.done||0).toLocaleString(),`of ~${(p.target||0).toLocaleString()}`)
+    +card('Auto-pass',(p.pass||0).toLocaleString(),'high confidence')
+    +card('Needs review',`<span style="color:var(--warn)">${(p.review||0).toLocaleString()}</span>`,'dark / low-confidence')
+    +card('Failed',`<span style="color:${p.fail?'var(--bad)':'var(--mut)'}">${p.fail||0}</span>`,'kept as-is')
+    +card('Reclaimable',(p.reclaimable_gb||0)+' GB',`${p.raw_gb||0} GB → ${p.jpeg_gb||0} GB`)
+    +card('ETA',p.eta_min!=null?fmtMin(p.eta_min):'—',p.rate_per_min!=null?`${p.rate_per_min}/min`:'');
+  const pct=p.target?Math.min(100,100*p.done/p.target):0;
+  $('#phbar').style.width=pct+'%';
+  $('#phline').textContent=`${(p.done||0).toLocaleString()} / ~${(p.target||0).toLocaleString()} (${pct.toFixed(1)}%) · ${p.review||0} to review · ${p.reviewed||0} reviewed`;
+  if(n&&n.used_pct!=null){$('#nasbar').style.width=n.used_pct+'%';$('#nasline').textContent=`${n.free_gb} GB free of ${n.total_gb} GB (${n.used_pct}% used)`;}
+  renderConvert(s.convert);
+  const v=s.video;
+  $('#vcards').innerHTML=
+     card('Status',v.running?(v.paused?'<span style="color:var(--warn)">Paused</span>':(v.in_window?'<span style="color:var(--ok)">Running</span>':'<span style="color:var(--warn)">Off-hours</span>')):'Idle',v.encoder)
+    +card('Encoded',(v.ok||0).toLocaleString(),v.fail?`${v.fail} failed`:'')
+    +card('Reclaimed',(v.reclaimed_gb||0)+' GB',`${v.in_gb||0} → ${v.out_gb||0} GB`)
+    +card('Queue',v.total!=null?v.total.toLocaleString():'—',
+        [v.done?`${v.done} triaged`:'',v.skipped_date?`${v.skipped_date} newer than ${v.cutoff_year}`:''].filter(Boolean).join(' · '));
+  $('#vConfigErr').textContent=v.config_error?('⚠ '+v.config_error):(v.fail&&v.last_error?('⚠ last failure — '+v.last_error):'');
+  $('#vcur').textContent=v.current?`Encoding: ${v.current}`:'';
+  $('#vbar').style.width=(v.current?v.current_pct:0)+'%';
+}
+function fmtMin(m){if(m<60)return m+' min';const h=Math.floor(m/60);return `${h}h ${m%60}m`;}
+
+// ---------- photo review ----------
+function refreshFilterUI(){
+  const c=photoState.counts||{all:0,pending:0,decided:0}, st=($('#pstatus').value||'').toLowerCase();
+  const labels={pending:'Needs input',decided:'Decided',all:'All'};
+  $('#pfilter').querySelectorAll('button').forEach(b=>{
+    const f=b.dataset.f;
+    b.textContent=`${labels[f]} (${Math.max(0,c[f]??0).toLocaleString()})`;
+    b.classList.toggle('on',f===photoState.filter);
+  });
+  // count line reflects the active view
+  const shown=photoState.filter==='pending'?c.pending:(photoState.filter==='decided'?c.decided:c.all);
+  $('#pcount').textContent=`${Math.max(0,shown??0).toLocaleString()} ${st}`;
+}
+function emptyMsg(){
+  const st=($('#pstatus').value||'').toLowerCase();
+  if(photoState.filter==='pending')return `<div class="empty">🎉 All caught up — nothing in ${esc(st)} needs input.</div>`;
+  if(photoState.filter==='decided')return `<div class="empty">No ${esc(st)} photos decided yet.</div>`;
+  return `<div class="empty">Nothing in ${esc(st)}.</div>`;
+}
+async function loadPhotos(force){
+  const st=$('#pstatus').value,sort=$('#psort').value,flt=photoState.filter,key=st+'|'+sort+'|'+flt;
+  if(!force&&photoState.key===key&&photoState.loaded)return;
+  photoState={key,loaded:false,filter:flt,counts:photoState.counts};
+  let d;try{d=await api(`/api/photos?status=${st}&sort=${sort}&decided=${flt}&limit=400`)}catch(e){photoReloading=false;banner('Failed to load photos: '+e.message);return;}
+  photoReloading=false;
+  photoState.loaded=true;photoState.counts=d.counts||null;focusIdx=-1;
+  refreshFilterUI();
+  if(!d.items.length){$('#photos').innerHTML=emptyMsg();return;}
+  $('#photos').innerHTML=d.items.map(it=>{
+    const name=esc((it.src_rel||'').split('/').pop());
+    const ip=enc(it.img||''); const full=`/api/img?path=${ip}`,thumb=`/api/img?w=460&path=${ip}`;
+    return `<div class="ph" data-key="${esc(it.key)}" data-full="${esc(full)}" ${it.decision?`data-decision="${esc(it.decision)}"`:''}>
+      <img loading="lazy" src="${esc(thumb)}">
+      <div class="meta"><b>${name}</b><br>${esc(it.capture_date||'')} · corr ${esc(it.corr)} · luma ${esc(it.luma_before)}→${esc(it.luma_after)}</div>
+      <div class="btns"><button class="ap">✓ Approve</button><button class="rj" title="too bright — re-develop one stop darker and re-review">↻ Darker</button><button class="rw" title="download the original RAW to edit manually (Photoshop / darktable / RawTherapee / Resolve) — keeps the RAW">⬇</button><button class="dl" title="delete the RAW — no JPEG kept">🗑</button></div></div>`;
+  }).join('');
+}
+// event delegation — no inline handlers, keys read from data-key (XSS/quote safe)
+$('#photos').addEventListener('click',e=>{
+  const ph=e.target.closest('.ph');if(!ph)return;
+  if(e.target.tagName==='IMG'){$('#lbimg').src=ph.dataset.full;$('#lb').classList.add('on');return;}
+  if(e.target.classList.contains('ap'))rev(ph,'approve');
+  else if(e.target.classList.contains('rj'))redo(ph);
+  else if(e.target.classList.contains('rw'))downloadRaw(ph);
+  else if(e.target.classList.contains('dl'))rev(ph,'delete');
+});
+async function downloadRaw(ph){
+  if(ph.dataset.busy)return; ph.dataset.busy='1';   // ignore re-fire while this card's request is in flight
+  try{
+    const key=ph.dataset.key,cur=ph.dataset.decision;
+    const a=document.createElement('a'); a.href='/api/raw?path='+encodeURIComponent(key); a.download=''; document.body.appendChild(a); a.click(); a.remove();
+    await api('/api/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,decision:'manual'})});
+    ph.dataset.decision='manual';
+    applyDecisionTransition(ph,!!cur,true);
+  }catch(e){banner('downloaded, but couldn\'t mark manual: '+e.message);}
+  finally{delete ph.dataset.busy;}
+}
+async function redo(ph){
+  if(ph.dataset.busy)return; ph.dataset.busy='1';
+  try{
+    const key=ph.dataset.key,cur=ph.dataset.decision;
+    await api('/api/reconvert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key})});
+    if(cur)ph.removeAttribute('data-decision');           // /api/reconvert clears the decision server-side
+    applyDecisionTransition(ph,!!cur,false);              // back to undecided: adjusts counts, drops it from "Decided"
+    if(photoState.filter!=='decided'){                    // (in "Decided" it's animating out of this view)
+      ph.style.opacity=.5;
+      const m=ph.querySelector('.meta'); if(m&&!m.querySelector('.redoing')) m.insertAdjacentHTML('beforeend','<br><span class="redoing" style="color:var(--acc)">↻ re-developing darker…</span>');
+    }
+  }catch(e){banner('Re-convert failed: '+e.message);}
+  finally{delete ph.dataset.busy;}
+}
+async function rev(ph,decision){
+  if(ph.dataset.busy)return; ph.dataset.busy='1';   // a 2nd press before the POST returns must not double-count
+  try{
+    const key=ph.dataset.key,cur=ph.dataset.decision;
+    const next=(cur===decision)?'clear':decision;
+    await api('/api/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key,decision:next})});
+    if(next==='clear')ph.removeAttribute('data-decision');else ph.dataset.decision=next;
+    applyDecisionTransition(ph,!!cur,next!=='clear');
+  }catch(e){banner('Save failed (not recorded): '+e.message);}
+  finally{delete ph.dataset.busy;}
+}
+// the active filter's authoritative count (server truth, adjusted locally as decisions land)
+function activeCount(){const c=photoState.counts||{};return photoState.filter==='pending'?c.pending:(photoState.filter==='decided'?c.decided:c.all);}
+// keep the running counts accurate and drop a card if it no longer belongs in the active filter
+function applyDecisionTransition(ph,wasDecided,nowDecided){
+  const c=photoState.counts;
+  if(c){
+    if(!wasDecided&&nowDecided){c.pending--;c.decided++;}
+    else if(wasDecided&&!nowDecided){c.pending++;c.decided--;}
+    refreshFilterUI();
+  }
+  const f=photoState.filter;
+  const belongs=(f==='all')||(f==='pending'&&!nowDecided)||(f==='decided'&&nowDecided);
+  if(!belongs)removeCard(ph);
+}
+function removeCard(ph){
+  const before=cards(), idx=before.indexOf(ph), wasFocused=(focusIdx>=0&&before[focusIdx]===ph);
+  ph.classList.remove('focus');
+  ph.classList.add('leaving');             // pointer-events:none + excluded from cards() immediately
+  // Move keyboard focus SYNCHRONOUSLY (not after the 180ms fade) so a rapid next keypress
+  // and the visible focus ring track the SAME card, whichever card was actually removed.
+  const nav=cards();
+  if(!nav.length){focusIdx=-1;}
+  else if(focusIdx>=0){
+    const ni=wasFocused?idx:(idx<focusIdx?focusIdx-1:focusIdx);
+    focusIdx=Math.min(Math.max(ni,0),nav.length-1);
+    nav.forEach((x,j)=>x.classList.toggle('focus',j===focusIdx));
+    nav[focusIdx].scrollIntoView({block:'nearest'});
+  }
+  setTimeout(()=>{
+    ph.remove();
+    if(!cards().length){
+      // page empty — but the authoritative count may still have more on the next page
+      if((activeCount()||0)>0){ if(!photoReloading){photoReloading=true;loadPhotos(true);} return; }
+      $('#photos').innerHTML=emptyMsg();focusIdx=-1;
+    }
+  },180);
+}
+function cards(){return [...document.querySelectorAll('#photos .ph:not(.leaving)')]}
+function setFocus(i){const c=cards();if(!c.length)return;focusIdx=(i+c.length)%c.length;c.forEach((x,j)=>x.classList.toggle('focus',j===focusIdx));c[focusIdx].scrollIntoView({block:'nearest'});}
+document.addEventListener('keydown',e=>{
+  if(tab!=='photos'||e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
+  const c=cards();const k=e.key.toLowerCase();
+  if(k==='j'||e.key==='ArrowRight'){setFocus(focusIdx+1);e.preventDefault();}
+  else if(k==='k'||e.key==='ArrowLeft'){setFocus(focusIdx-1);e.preventDefault();}
+  else if(focusIdx>=0&&c[focusIdx]){
+    if(e.repeat)return;   // a HELD action key must not fire dozens of decisions (J/K above still repeat)
+    if(k==='a')rev(c[focusIdx],'approve');
+    else if(k==='r')redo(c[focusIdx]);
+    else if(k==='m')downloadRaw(c[focusIdx]);
+    else if(k==='d')rev(c[focusIdx],'delete');
+    else if(k==='c'){c[focusIdx].dataset.decision&&rev(c[focusIdx],c[focusIdx].dataset.decision);}
+    else if(e.key==='Enter'){$('#lbimg').src=c[focusIdx].dataset.full;$('#lb').classList.add('on');}
+  }
+});
+async function bulk(decision){
+  const keys=cards().map(c=>c.dataset.key);if(!keys.length)return;
+  if(!confirm(`${decision} all ${keys.length} shown?`))return;
+  try{await api('/api/review/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys,decision})});}
+  catch(e){banner('Bulk failed: '+e.message);return;}
+  loadPhotos(true);   // re-sync counts and drop the now-decided cards from "Needs input"
+}
+$('#bulkApprove').onclick=()=>bulk('approve');
+$('#reloadPhotos').onclick=()=>loadPhotos(true);
+$('#pstatus').onchange=()=>loadPhotos(true);$('#psort').onchange=()=>loadPhotos(true);
+$('#pfilter').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-f]');if(!b||b.dataset.f===photoState.filter)return;
+  photoState.filter=b.dataset.f;localStorage.setItem('cull.pfilter',b.dataset.f);
+  loadPhotos(true);
+});
+$('#lb').onclick=()=>$('#lb').classList.remove('on');
+
+// ---------- deletion ----------
+async function loadDeletion(){
+  let p;try{p=await api('/api/deletion/preview')}catch(e){banner('Deletion preview failed: '+e.message);return;}
+  $('#delcards').innerHTML=
+     card('Deletable now',(p.count||0).toLocaleString(),'verified + approved')
+    +card('Space to reclaim',(p.gb||0)+' GB','when purged')
+    +card('Auto (PASS)',(p.pass||0).toLocaleString(),'')
+    +card('Approved review',(p.approved_review||0).toLocaleString(),'');
+  let s;try{s=await api('/api/deletion/staged')}catch(e){return;}
+  $('#stagedWrap').innerHTML=s.count?`<b>${s.count}</b> staged · ${s.gb} GB held (recoverable)`:'Nothing staged.';
+}
+$('#stageBtn').onclick=async()=>{
+  if(!confirm('Move all verified+approved originals to the holding folder? (recoverable, frees space only on Purge)'))return;
+  try{const r=await api('/api/deletion/stage',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});banner('');alert(`Staged ${r.staged} (${r.gb} GB).`+(r.errors&&r.errors.length?`\nErrors: ${r.errors.length}`:''));}
+  catch(e){banner('Stage failed: '+e.message);}loadDeletion();
+};
+$('#recoverBtn').onclick=async()=>{if(!confirm('Recover all staged originals back into place?'))return;try{const r=await api('/api/deletion/recover',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});alert(`Recovered ${r.recovered}.`);}catch(e){banner('Recover failed: '+e.message);}loadDeletion();};
+$('#purgeBtn').onclick=async()=>{
+  const tok=$('#purgeTok').value;
+  if(tok!=='PURGE'){alert('Type PURGE to confirm permanent deletion.');return;}
+  if(!confirm('PERMANENTLY delete all staged originals? This frees space and cannot be undone.'))return;
+  try{const r=await api('/api/deletion/purge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirm:'PURGE'})});alert(`Purged ${r.purged}, freed ${r.freed_gb} GB.`);}
+  catch(e){banner('Purge failed: '+e.message);}$('#purgeTok').value='';loadDeletion();
+};
+
+// ---------- convert older photos ----------
+$('#convYear').addEventListener('input',()=>{convYearTouched=true;});
+function renderConvert(c){
+  c=c||{};
+  if(!convYearTouched && !$('#convYear').value)          // seed the field once
+    $('#convYear').value = c.policy_cutoff || c.cutoff_year || 2021;
+  const el=$('#convStatus');
+  if(c.policy_cutoff && !c.worker_alive){
+    el.innerHTML=`<span style="color:var(--warn)">conversion box offline — queued ≤${esc(c.policy_cutoff)}, will run when it's back</span>`;
+  } else if(c.running && c.remaining){
+    el.innerHTML=`converting photos ≤${esc(c.cutoff_year)}: <b>${(c.remaining).toLocaleString()}</b> to go`+(c.current?` · ${esc(c.current)}`:'');
+  } else if(c.cutoff_year){
+    el.innerHTML=`photos ≤${esc(c.cutoff_year)}: <span style="color:var(--ok)">up to date ✓</span>`+(c.gave_up?` · <span style="color:var(--bad)">${c.gave_up} failed</span>`:'');
+  } else { el.textContent=''; }
+}
+$('#convApply').onclick=async()=>{
+  const y=parseInt($('#convYear').value,10);
+  if(!Number.isFinite(y)||y<1990||y>2100){banner('Enter a year between 1990 and 2100.');return;}
+  if(!confirm(`Convert ALL RAW photos from ${y} and older into archive JPEGs?\n\nRuns on the conversion box; already-converted photos are skipped. Originals are never touched.`))return;
+  try{await api('/api/convert/policy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({cutoff_year:y})});banner('');convYearTouched=false;tick();}
+  catch(e){banner('Could not set conversion cutoff: '+e.message);}
+};
+
+// ---------- video ----------
+async function vid(a){try{await api('/api/video/'+a,{method:'POST'});tick();}catch(e){banner('Video '+a+' failed: '+e.message);}}
+async function syncVideoCfg(){
+  let v;try{v=await api('/api/video')}catch(e){return;}const c=v.cfg||{};
+  $('#vQual').value=c.quality||'balanced';
+  $('#vCutoff').value=c.cutoff_year??2020;
+  $('#vSched').checked=!!c.schedule_enabled;$('#vStart').value=c.start_hour??22;$('#vEnd').value=c.end_hour??7;
+  $('#vEncInfo').textContent='Encoder: '+(v.encoder||'?')+(v.encoder==='hevc_videotoolbox'?' (Mac hardware)':' (software)');
+}
+$('#vSave').onclick=async()=>{
+  const patch={quality:$('#vQual').value,schedule_enabled:$('#vSched').checked,
+    start_hour:+$('#vStart').value,end_hour:+$('#vEnd').value};
+  // Only send a cutoff when the field holds a real year. A blank field would coerce to 0
+  // → clamp to 1990 → silently skip almost every clip, so reject it instead of guessing.
+  const cy=$('#vCutoff').value.trim();
+  if(cy===''||!Number.isFinite(+cy)||+cy<1990||+cy>2100){
+    banner('Enter a cutoff year between 1990 and 2100.');$('#vCutoff').focus();return;
+  }
+  patch.cutoff_year=+cy;
+  try{await api('/api/video/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(patch)});banner('');}catch(e){banner('Save failed: '+e.message);}
+};
+$('#vLoadQ').onclick=loadQueue;
+async function loadQueue(){
+  $('#vqueue').textContent='loading…';
+  let d;try{d=await api('/api/video/queue')}catch(e){$('#vqueue').textContent='failed: '+e.message;return;}
+  $('#vqueue').innerHTML=`<table><tr><th>file</th><th>status</th><th>src</th><th>out</th><th>keep original</th></tr>`+
+    d.items.map(i=>`<tr><td>${esc(i.rel)}</td><td>${esc(i.status)}</td><td>${i.src_mb} MB</td><td>${i.out_mb?i.out_mb+' MB':''}</td>
+      <td><button class="ghost small keepbtn" data-rel="${esc(i.rel)}" data-keep="${i.keep?1:0}">${i.keep?'★ keeping':'keep'}</button></td></tr>`).join('')+`</table>`;
+}
+$('#vqueue').addEventListener('click',async e=>{
+  const b=e.target.closest('.keepbtn');if(!b)return;
+  const keep=b.dataset.keep!=='1';
+  try{await api('/api/video/keep',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rel:b.dataset.rel,keep})});}
+  catch(err){banner('keep failed: '+err.message);return;}
+  b.dataset.keep=keep?'1':'0';b.textContent=keep?'★ keeping':'keep';
+});
+
+tick();setInterval(tick,4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
+syncVideoCfg();
+</script>
+</body></html>
