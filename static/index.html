@@ -403,13 +403,13 @@ function fmtAgo(ts){if(!ts)return '';const d=Math.max(0,Math.floor(Date.now()/10
 async function loadDeletion(){
   // progress FIRST: it's a cheap in-memory read, so a job started before this page load
   // (or in another tab) shows its bar immediately instead of after the manifest scan.
-  let j=null;try{j=await api('/api/deletion/stage/progress')}catch(e){}
+  let j=null;try{j=await api('/api/deletion/job')}catch(e){}
   renderStage(j);
   const running=j&&j.state==='running';
   if(running)startStagePoll();
   loadDelCards();
-  // /api/deletion/staged waits on the same lock stage() holds for its whole run — asking
-  // for it now would just hang, so the list refreshes when the job finishes.
+  // /api/deletion/staged waits on the same lock the mutating jobs hold for their whole run —
+  // asking for it now would just hang, so the list refreshes when the job finishes.
   if(!running)loadStaged();
 }
 
@@ -442,7 +442,7 @@ function renderStagedTable(s){
   $('#stagedWrap').innerHTML=`<div class="tablewrap"><table>
     <thead><tr><th>Original path (under RAW root)</th><th style="width:90px">Size</th><th style="width:90px">Staged</th><th style="width:110px"></th></tr></thead>
     <tbody>${rows.map(i=>`<tr>
-      <td class="path">${esc(i.key)}${i.no_archive?' <span style="color:#fb923c">· no JPEG kept</span>':''}${i.held_exists?'':' <span style="color:var(--bad)">· HELD FILE MISSING</span>'}</td>
+      <td class="path">${esc(i.key)}${i.no_archive?' <span style="color:#fb923c">· no JPEG kept</span>':''}${i.held_exists===false?' <span style="color:var(--bad)">· HELD FILE MISSING</span>':''}</td>
       <td>${fmtBytes(i.bytes)}</td><td class="muted">${esc(fmtAgo(i.ts))}</td>
       <td><button data-recover="${esc(i.key)}">↩ Recover</button></td></tr>`).join('')}</tbody></table></div>`;
   $('#stagedWrap').querySelectorAll('button[data-recover]').forEach(b=>b.onclick=()=>recoverKeys([b.dataset.recover],b));
@@ -453,14 +453,14 @@ $('#stagedFilter').addEventListener('input',()=>renderStagedTable(stagedSummary)
 
 // ---- reconcile the holding folder with the log ----
 $('#scanHoldBtn').onclick=()=>scanHolding(false);
-async function scanHolding(commit){
-  const btn=$('#scanHoldBtn'), w=$('#adoptWrap');
-  btn.disabled=true; w.innerHTML='<div class="muted small" style="margin-top:10px">Walking the holding folder — this can take a minute on the NAS…</div>';
-  let r;
-  try{r=await api('/api/deletion/adopt',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({commit:!!commit})});}
-  catch(e){w.innerHTML=`<div class="small" style="color:var(--bad);margin-top:10px">Scan failed: ${esc(e.message)}</div>`;btn.disabled=false;return;}
-  btn.disabled=false;
+function scanHolding(commit){
+  $('#adoptWrap').innerHTML='';
+  banner('');
+  return startJob('adopt',{commit:!!commit});
+}
+function renderAdopt(r){
+  const w=$('#adoptWrap');
+  if(!r){loadDeletion();return;}
   if(r.error){w.innerHTML=`<div class="small" style="color:var(--bad);margin-top:10px">${esc(r.error)}</div>`;return;}
   const reasons=Object.entries(r.skipped_reasons||{});
   w.innerHTML=`<div class="card" style="margin-top:11px">
@@ -470,6 +470,7 @@ async function scanHolding(commit){
       · ${(r.already_tracked||0).toLocaleString()} already tracked
       ${r.skipped?`· <span style="color:var(--warn)">${r.skipped.toLocaleString()} left alone</span>`:''}
     </div>
+    <div class="muted small" style="margin-top:4px">${(r.scanned||0).toLocaleString()} files walked${r.ignored_system_files?` · ${r.ignored_system_files.toLocaleString()} system file${r.ignored_system_files===1?'':'s'} ignored (.DS_Store and friends)`:''}</div>
     ${reasons.length?`<div class="muted small" style="margin-top:8px">Left in the holding folder, not adopted:<br>`
       +reasons.map(([why,n])=>`&nbsp;• <b>${n.toLocaleString()}</b> — ${esc(why)}`).join('<br>')+'</div>':''}
     ${(r.skipped_examples||[]).length?`<div class="feed" style="max-height:120px">`
@@ -480,85 +481,107 @@ async function scanHolding(commit){
   const ab=$('#adoptBtn');
   if(ab)ab.onclick=()=>{
     if(!confirm(`Adopt ${r.adopted} verified files into the deletion log?\n\nNothing is deleted — this rebuilds the recovery map so they show in the staged list and Purge can see them.`))return;
-    scanHolding(true).then(loadDeletion);
+    scanHolding(true);
   };
-  if(commit)loadStaged();
+  if(r.committed)loadStaged();
 }
 
 // ---- staging with live progress ----
+const JOB_TITLE={stage:'Staging',purge:'Purging',recover:'Recovering',adopt:'Scanning holding folder'};
 function renderStage(j){
   const box=$('#stageJob');
-  if(!j||j.state==='idle'){box.hidden=true;return;}
+  if(!j||j.state==='idle'){box.hidden=true;setJobButtons(false,'');return;}
   box.hidden=false;
-  const running=j.state==='running';
-  $('#stageBtn').disabled=running;
-  $('#stageBtn').textContent=running?'Staging…':'Stage all deletable →';
+  const running=j.state==='running', kind=j.kind||'stage';
+  setJobButtons(running,kind);
   const pct=j.state==='done'?100:(j.pct||0);
   $('#stageBar').style.width=pct+'%';
-  $('#stageJobPct').textContent=j.total?`${(j.done||0).toLocaleString()} / ${j.total.toLocaleString()} · ${pct}%`:'';
+  $('#stageJobPct').textContent=j.total?`${(j.done||0).toLocaleString()} / ${j.total.toLocaleString()} · ${pct}%`
+    :(j.done?`${(j.done||0).toLocaleString()} scanned`:'');
   const nerr=j.error_count!=null?j.error_count:(j.errors||[]).length;
-  const moved=`<b>${(j.staged||0).toLocaleString()}</b> moved to holding · ${j.gb||0} GB`
-    +(j.skipped?` · ${j.skipped} already staged`:'')
-    +(nerr?` · <span style="color:var(--bad)">${nerr.toLocaleString()} skipped with error${nerr>1?'s':''}</span>`:'');
+  const moved=`<b>${(j.ok||0).toLocaleString()}</b> ${esc(j.verb||'processed')}`
+    +(kind==='adopt'?'':` · ${j.gb||0} GB`)
+    +(j.skipped?` · ${j.skipped.toLocaleString()} skipped`:'')
+    +(nerr?` · <span style="color:var(--bad)">${nerr.toLocaleString()} with error${nerr>1?'s':''}</span>`:'');
+  const title=JOB_TITLE[kind]||'Job';
   $('#stageJobLine').innerHTML=
-      j.state==='error'?`<span style="color:var(--bad)">Staging failed</span> — ${moved}`
-    : running?(j.phase==='scanning'?'Scanning manifest for deletable originals…':`Moving originals into the holding folder — ${moved}`)
-    : `<span style="color:var(--ok)">Staging finished</span> — ${moved}`;
+      j.state==='error'?`<span style="color:var(--bad)">${esc(title)} failed</span> — ${moved}`
+    : running?(j.phase?`${esc(j.phase[0].toUpperCase()+j.phase.slice(1))} — ${moved}`:`${esc(title)} — ${moved}`)
+    : `<span style="color:var(--ok)">${esc(title)} finished</span> — ${moved}`;
   $('#stageCur').textContent=running&&j.current?'→ '+j.current:'';
-  if(running&&!stagedItems.length)$('#stagedWrap').innerHTML='The staged list refreshes when this job finishes — files moved so far are listed above.';
+  if(running)$('#stagedWrap').innerHTML='The staged list refreshes when this job finishes — progress is above.';
   const shownErr=(j.errors||[]).slice(-5);
   $('#stageErrs').innerHTML=shownErr.map(e=>'⚠ '+esc(e)).join('<br>')
     +(nerr>shownErr.length?`<div class="muted">…and ${(nerr-shownErr.length).toLocaleString()} more — those originals were left in place, nothing was lost</div>`:'');
   const feed=$('#stageFeed'), rec=(j.recent||[]).slice().reverse();
   feed.hidden=!rec.length;
-  feed.innerHTML=`<div style="color:var(--mut)">— ${running?'moving':'moved'}, newest first${(j.staged||0)>rec.length?` (last ${rec.length} of ${j.staged.toLocaleString()}; the full set is in the staged table below)`:''} —</div>`
+  feed.innerHTML=`<div style="color:var(--mut)">— ${esc(j.verb||'done')}, newest first${(j.ok||0)>rec.length?` (last ${rec.length} of ${j.ok.toLocaleString()})`:''} —</div>`
     +rec.map(r=>`<div>✓ ${esc(r.key)} <span style="opacity:.7">${fmtBytes(r.bytes)}</span></div>`).join('');
 }
 
 function startStagePoll(){
   if(stagePoll)return;
   stagePoll=setInterval(async()=>{
-    let j;try{j=await api('/api/deletion/stage/progress')}catch(e){return;}
+    let j;try{j=await api('/api/deletion/job')}catch(e){return;}
     renderStage(j);
-    if(j.state!=='running'){clearInterval(stagePoll);stagePoll=null;loadDeletion();}
+    if(j.state!=='running'){
+      clearInterval(stagePoll);stagePoll=null;
+      if(j.kind==='adopt')renderAdopt(j.result); else loadDeletion();
+    }
   },500);
+}
+
+async function startJob(kind,extra){
+  const body=Object.assign({kind},extra||{});
+  try{
+    const r=await api('/api/deletion/job/start',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify(body)});
+    banner(r.started?'':(r.reason||'a job is already running'));
+    renderStage(r.progress);startStagePoll();
+    return r;
+  }catch(e){banner(kind+' failed: '+e.message);renderStage(null);return null;}
+}
+
+// every mutating job takes the same lock, so while one runs the rest must stay out
+function setJobButtons(running,kind){
+  const labels={stageBtn:['Stage all deletable →','Staging…'],
+                recoverBtn:['↩ Recover all','Recovering…'],
+                purgeBtn:['Purge (permanent)','Purging…'],
+                scanHoldBtn:['Scan holding folder','Scanning…']};
+  const active={stage:'stageBtn',recover:'recoverBtn',purge:'purgeBtn',adopt:'scanHoldBtn'}[kind];
+  for(const id in labels){
+    const b=$('#'+id); if(!b)continue;
+    b.disabled=running;
+    b.textContent=(running&&id===active)?labels[id][1]:labels[id][0];
+  }
+  document.querySelectorAll('#stagedWrap button[data-recover]').forEach(b=>b.disabled=running);
 }
 
 $('#stageBtn').onclick=async()=>{
   if(!confirm('Move all verified+approved originals to the holding folder? (recoverable, frees space only on Purge)'))return;
-  $('#stageBtn').disabled=true;
-  try{
-    const r=await api('/api/deletion/stage/start',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
-    banner('');renderStage(r.progress);startStagePoll();
-    if(!r.started)banner(r.reason||'a stage job is already running');
-  }catch(e){$('#stageBtn').disabled=false;banner('Stage failed: '+e.message);}
+  banner('');startJob('stage');
 };
 
 async function recoverKeys(keys,btn){
-  const all=keys===null;
-  if(all&&!confirm('Recover all staged originals back into place?'))return;
   if(btn){btn.disabled=true;btn.textContent='…';}
   try{
     const r=await api('/api/deletion/recover',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify(all?{}:{keys})});
+      body:JSON.stringify({keys})});
     banner(r.errors&&r.errors.length?`Recovered ${r.recovered} · ${r.errors.length} problem(s): ${r.errors[0]}`:'');
   }catch(e){banner('Recover failed: '+e.message);}
   loadDeletion();
 }
-$('#recoverBtn').onclick=async()=>{
-  const b=$('#recoverBtn');b.disabled=true;b.textContent='Recovering…';
-  await recoverKeys(null);
-  b.disabled=false;b.textContent='↩ Recover all';
+$('#recoverBtn').onclick=()=>{
+  if(!confirm('Recover all staged originals back into place?'))return;
+  banner('');startJob('recover',{keys:null});
 };
 $('#purgeBtn').onclick=async()=>{
   const tok=$('#purgeTok').value;
   if(tok!=='PURGE'){alert('Type PURGE to confirm permanent deletion.');return;}
-  if(!confirm('PERMANENTLY delete all staged originals? This frees space and cannot be undone.'))return;
-  const b=$('#purgeBtn');b.disabled=true;b.textContent='Purging…';
-  try{const r=await api('/api/deletion/purge',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({confirm:'PURGE'})});
-      banner('');alert(`Purged ${r.purged}, freed ${r.freed_gb} GB.`+(r.errors&&r.errors.length?`\nErrors: ${r.errors.length}`:''));}
-  catch(e){banner('Purge failed: '+e.message);}
-  b.disabled=false;b.textContent='Purge (permanent)';$('#purgeTok').value='';loadDeletion();
+  const n=(stagedSummary&&stagedSummary.count)||0;
+  if(!confirm(`PERMANENTLY delete ${n.toLocaleString()} staged original${n===1?'':'s'} (${(stagedSummary&&stagedSummary.gb)||0} GB)?\n\nThis frees the space and cannot be undone.`))return;
+  $('#purgeTok').value='';banner('');
+  startJob('purge',{confirm:'PURGE'});
 };
 
 // ---------- convert older photos ----------

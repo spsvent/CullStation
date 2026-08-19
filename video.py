@@ -331,6 +331,11 @@ class VideoWorker:
             return {"error": "path outside the video source tree"}
         with self.lock:
             prev = self.state["done"].pop(p, None)
+            if prev and prev.get("status") == "DONE":
+                # this clip's bytes are already in the running totals; leaving them there
+                # would double-count them when it re-encodes.
+                self.state["din"] = max(0, self.state.get("din", 0) - prev.get("src_bytes", 0))
+                self.state["dout"] = max(0, self.state.get("dout", 0) - prev.get("out_bytes", 0))
         if prev is None:
             return {"rel": rel, "cleared": False, "note": "no recorded result for this clip"}
         self._save_state()
@@ -423,12 +428,21 @@ class VideoWorker:
         raise RuntimeError(" ‖ ".join(errs))
 
     def _verify(self, src, out, src_dur):
+        """(ok, reason). The reason is recorded on a FAIL_VERIFY so 'output failed
+        verification' is never the whole story — an unreadable source, a duration mismatch
+        and a non-HEVC output need different responses."""
         if not os.path.getsize(out):
-            return False
+            return False, "encoder produced an empty file"
         do = _ffprobe_duration(out)
-        if do is None or src_dur is None or abs(src_dur - do) > 0.6:
-            return False
-        return _is_hevc(out)   # confirm we actually wrote HEVC, not a silent fallback
+        if do is None:
+            return False, "could not read the duration of the encoded file"
+        if src_dur is None:
+            return False, "could not read the duration of the SOURCE, so the output can't be checked against it"
+        if abs(src_dur - do) > 0.6:
+            return False, f"duration mismatch: source {src_dur:.1f}s vs output {do:.1f}s"
+        if not _is_hevc(out):   # confirm we actually wrote HEVC, not a silent fallback
+            return False, "output is not HEVC (the encoder fell back to another codec)"
+        return True, ""
 
     # ---------- main loop ----------
     def _run(self):
@@ -475,7 +489,8 @@ class VideoWorker:
                 self.current, self.cur_pct = rel, 0.0
                 try:
                     used = self._encode_fallback(src, tmp, dur, rel)
-                    if self._verify(src, tmp, dur):
+                    vok, vwhy = self._verify(src, tmp, dur)
+                    if vok:
                         os.replace(tmp, out); ob = os.path.getsize(out)
                         rec = {"status": "DONE", "src_bytes": sb, "out_bytes": ob}
                         if used is not ATTEMPTS[0]:   # note the compromise, never silently
@@ -488,10 +503,9 @@ class VideoWorker:
                         _rm(tmp)
                         with self.lock:
                             self.state["done"][src] = {"status": "FAIL_VERIFY", "src_bytes": sb,
-                                                       "err": "output failed verification "
-                                                              "(duration or codec mismatch)",
+                                                       "err": f"output failed verification — {vwhy}",
                                                        "ts": int(time.time())}
-                        self.last_error = f"{rel}: output failed verification"
+                        self.last_error = f"{rel}: output failed verification — {vwhy}"
                 except Exception as e:
                     _rm(tmp)
                     with self.lock:

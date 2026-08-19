@@ -135,6 +135,7 @@ def img(path: str, w: int = 0):
         raise HTTPException(404, "not found")
     headers = {"Cache-Control": "max-age=86400"}
     if w and HAVE_PIL:
+        w = max(16, min(int(w), 4096))   # a caller-supplied size can't ask for a huge decode
         try:
             with Image.open(p) as im:
                 im.thumbnail((w, w))
@@ -248,15 +249,32 @@ def del_staged(limit: int = 500, offset: int = 0):
 @app.post("/api/deletion/stage", dependencies=[Depends(csrf_guard)])
 def del_stage(body: dict = Body(default={})): return deletion.stage(body.get("keys"))
 
+# Non-blocking variants: every one of these walks thousands of files on a NAS, so the UI
+# starts a job and polls /api/deletion/job instead of holding a request open for minutes.
 @app.post("/api/deletion/stage/start", dependencies=[Depends(csrf_guard)])
 def del_stage_start(body: dict = Body(default={})):
-    """Non-blocking staging: returns at once, the UI polls /api/deletion/stage/progress
-    so a multi-minute NAS move shows a live bar instead of a frozen button."""
     r = deletion.stage_start(body.get("keys"))
-    return {**r, "progress": deletion.stage_progress()}
+    return {**r, "progress": deletion.job_progress()}
 
 @app.get("/api/deletion/stage/progress")
-def del_stage_progress(): return deletion.stage_progress()
+def del_stage_progress(): return deletion.job_progress()   # kept for older clients
+
+@app.get("/api/deletion/job")
+def del_job(): return deletion.job_progress()
+
+@app.post("/api/deletion/job/start", dependencies=[Depends(csrf_guard)])
+def del_job_start(body: dict = Body(...)):
+    """kind = stage | purge | recover | adopt (plus that job's own arguments)."""
+    kind = body.get("kind")
+    kw = {}
+    if kind == "purge":
+        kw["confirm"] = body.get("confirm")
+    elif kind == "adopt":
+        kw["commit"] = bool(body.get("commit"))
+    else:
+        kw["keys"] = body.get("keys")
+    r = deletion.job_start(kind, **kw)
+    return {**r, "progress": deletion.job_progress()}
 
 @app.post("/api/deletion/adopt", dependencies=[Depends(csrf_guard)])
 def del_adopt(body: dict = Body(default={})):

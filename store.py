@@ -1,5 +1,5 @@
 """Data layer: cached manifest reads, review decisions, NAS free space, conversion ETA."""
-import os, json, time, threading
+import os, json, time, threading, tempfile
 from collections import deque, Counter
 import config as C
 
@@ -10,15 +10,24 @@ _rate = deque(maxlen=180)   # (timestamp, done_count) samples for ETA
 _rate_last_t = 0.0          # throttle: one sample per window regardless of #pollers
 
 def _write_json(path, obj):
-    """Atomic, durable JSON write (temp + fsync file + rename + fsync dir)."""
+    """Atomic, durable JSON write (temp + fsync file + rename + fsync dir).
+
+    The temp name is UNIQUE per writer: a shared '<path>.tmp' means two concurrent writes to
+    the same file (two reconvert clicks on one photo, the app plus a worker process) truncate
+    each other's temp and one rename lands on a half-written file — or fails outright."""
     d = os.path.dirname(path) or "."
     os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(obj, fh)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(obj, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try: os.remove(tmp)
+        except OSError: pass
+        raise
     try:   # make the rename itself durable
         dfd = os.open(d, os.O_DIRECTORY)
         try: os.fsync(dfd)
