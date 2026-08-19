@@ -128,6 +128,14 @@ button.small{padding:4px 9px;font-size:12px}
       <div class="small" id="stageErrs" style="color:var(--bad);margin-top:6px"></div>
       <div class="feed" id="stageFeed" hidden></div>
     </div>
+    <div class="row" style="margin:16px 0 0">
+      <button class="ghost" id="scanHoldBtn">Scan holding folder</button>
+      <span class="muted small">Finds files already in the holding folder that the deletion log isn't tracking
+        (an older run, or a log that was lost) and re-checks each one against the manifest, your review decisions
+        and the JPEG on disk. Deletes nothing.</span>
+    </div>
+    <div id="adoptWrap"></div>
+
     <h2>Staged (recoverable) — <span id="stagedTotals">…</span></h2>
     <div class="row" style="margin-bottom:10px">
       <button class="ghost" id="recoverBtn">↩ Recover all</button>
@@ -442,6 +450,40 @@ function renderStagedTable(s){
   if(la)la.onclick=e=>{e.preventDefault();la.textContent='loading…';stagedLimit=0;loadStaged();};
 }
 $('#stagedFilter').addEventListener('input',()=>renderStagedTable(stagedSummary));
+
+// ---- reconcile the holding folder with the log ----
+$('#scanHoldBtn').onclick=()=>scanHolding(false);
+async function scanHolding(commit){
+  const btn=$('#scanHoldBtn'), w=$('#adoptWrap');
+  btn.disabled=true; w.innerHTML='<div class="muted small" style="margin-top:10px">Walking the holding folder — this can take a minute on the NAS…</div>';
+  let r;
+  try{r=await api('/api/deletion/adopt',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({commit:!!commit})});}
+  catch(e){w.innerHTML=`<div class="small" style="color:var(--bad);margin-top:10px">Scan failed: ${esc(e.message)}</div>`;btn.disabled=false;return;}
+  btn.disabled=false;
+  if(r.error){w.innerHTML=`<div class="small" style="color:var(--bad);margin-top:10px">${esc(r.error)}</div>`;return;}
+  const reasons=Object.entries(r.skipped_reasons||{});
+  w.innerHTML=`<div class="card" style="margin-top:11px">
+    <div class="k">${r.committed?'Adopted into the deletion log':'Holding folder — dry run, nothing written'}</div>
+    <div style="margin-top:7px">
+      <b>${(r.adopted||0).toLocaleString()}</b> file${r.adopted===1?'':'s'} (${r.gb||0} GB) ${r.committed?'now tracked and recoverable':'verified and ready to adopt'}
+      · ${(r.already_tracked||0).toLocaleString()} already tracked
+      ${r.skipped?`· <span style="color:var(--warn)">${r.skipped.toLocaleString()} left alone</span>`:''}
+    </div>
+    ${reasons.length?`<div class="muted small" style="margin-top:8px">Left in the holding folder, not adopted:<br>`
+      +reasons.map(([why,n])=>`&nbsp;• <b>${n.toLocaleString()}</b> — ${esc(why)}`).join('<br>')+'</div>':''}
+    ${(r.skipped_examples||[]).length?`<div class="feed" style="max-height:120px">`
+      +r.skipped_examples.slice(0,20).map(x=>`<div>… ${esc(x.key)} <span style="opacity:.7">${esc(x.why)}</span></div>`).join('')+'</div>':''}
+    ${!r.committed&&r.adopted?`<div style="margin-top:11px"><button class="act" id="adoptBtn">Adopt ${(r.adopted).toLocaleString()} files into the log →</button>
+      <span class="muted small">Makes them visible below and recoverable. They are only deleted when you Purge.</span></div>`:''}
+  </div>`;
+  const ab=$('#adoptBtn');
+  if(ab)ab.onclick=()=>{
+    if(!confirm(`Adopt ${r.adopted} verified files into the deletion log?\n\nNothing is deleted — this rebuilds the recovery map so they show in the staged list and Purge can see them.`))return;
+    scanHolding(true).then(loadDeletion);
+  };
+  if(commit)loadStaged();
+}
 
 // ---- staging with live progress ----
 function renderStage(j){

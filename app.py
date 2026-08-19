@@ -258,6 +258,12 @@ def del_stage_start(body: dict = Body(default={})):
 @app.get("/api/deletion/stage/progress")
 def del_stage_progress(): return deletion.stage_progress()
 
+@app.post("/api/deletion/adopt", dependencies=[Depends(csrf_guard)])
+def del_adopt(body: dict = Body(default={})):
+    """Re-verify files already in the holding folder that the deletion log doesn't track and
+    (with commit=true) rebuild their recovery entries. Deletes nothing."""
+    return deletion.adopt(bool(body.get("commit")))
+
 @app.post("/api/deletion/recover", dependencies=[Depends(csrf_guard)])
 def del_recover(body: dict = Body(default={})): return deletion.recover(body.get("keys"))
 

@@ -45,6 +45,8 @@ c, sp = call("/api/deletion/stage/progress")
 check("stage progress 200 + shape", c == 200 and bool(sp) and all(k in sp for k in ("state", "done", "total", "pct")))
 c, _ = call("/api/deletion/stage/start", "POST", {})
 check("CSRF: stage start without header → 403", c == 403)
+c, _ = call("/api/deletion/adopt", "POST", {})   # no header → must not even walk the tree
+check("CSRF: adopt without header → 403", c == 403)
 c, _ = call("/api/video")
 check("video summary 200", c == 200)
 c, vf = call("/api/video/failed")

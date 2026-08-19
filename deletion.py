@@ -255,6 +255,87 @@ def staged_list(limit=500, offset=0):
         return {"count": len(items), "gb": round(sum(i.get("bytes", 0) for i in items) / 1e9, 2),
                 "offset": offset, "listed": len(page), "items": page}
 
+# ---------------- adopt orphaned holding files ----------------
+def _eligible(rec, reviews, rel):
+    """Same verdict deletable() reaches, minus 'the original is still in the RAW tree' —
+    an adopted file is by definition no longer there. Returns (ok, reason, jpg, no_archive)."""
+    st = rec.get("status")
+    decision = reviews.get(rel, {}).get("decision")
+    if decision == "manual":
+        return False, "marked manual (you are hand-editing this RAW)", "", False
+    approved = decision == "approve"
+    no_archive = decision == "delete"
+    if not (st == "PASS" or (st == "REVIEW" and approved) or no_archive):
+        return False, f"status {st or '?'} and not approved — never verified", "", False
+    jr = _jpg_rel(rec)
+    jpg = os.path.join(C.ARCHIVE_ROOT, jr) if jr else ""
+    if not no_archive and not (jpg and os.path.isfile(jpg) and os.path.getsize(jpg) > 1024):
+        return False, "converted JPEG missing or truncated in the archive", jpg, no_archive
+    return True, "", jpg, no_archive
+
+def adopt(commit=False):
+    """Rebuild the recovery map for files already sitting in HOLDING that the log doesn't
+    track — the state you get when a previous log was lost/rotated, or when files were moved
+    into holding outside the app. Every file is re-verified against the manifest, the review
+    decisions and the JPEG actually on disk before it is adopted; anything that fails stays
+    put and is reported. Nothing is deleted here — adoption only makes Purge (and Recover)
+    able to see these files, with the guards they normally apply.
+
+    commit=False (default) is a dry run: identical checks, nothing written."""
+    with _lock:
+        if not os.path.isdir(C.HOLDING_ROOT):
+            return {"error": f"holding folder not found: {C.HOLDING_ROOT}"}
+        by_rel = {r.get("src_rel"): r for r in store.read_manifest() if r.get("src_rel")}
+        reviews = store.load_reviews()
+        log = _load_log()
+        adopted, skipped, seen_bytes = [], [], 0
+        already = 0
+        for dp, _, fns in os.walk(C.HOLDING_ROOT):
+            for fn in fns:
+                held = os.path.join(dp, fn)
+                rel = os.path.relpath(held, C.HOLDING_ROOT)
+                if rel in log["staged"]:
+                    already += 1; continue
+                if _bad_rel(rel) or not _contained(held, C.HOLDING_ROOT):
+                    skipped.append({"key": rel, "why": "unsafe path"}); continue
+                rec = by_rel.get(rel)
+                if not rec:
+                    skipped.append({"key": rel, "why": "no manifest record — cannot verify it was converted"})
+                    continue
+                ok, why, jpg, no_archive = _eligible(rec, reviews, rel)
+                if not ok:
+                    skipped.append({"key": rel, "why": why}); continue
+                orig = os.path.join(C.RAW_ROOT, rel)
+                if not _contained(orig, C.RAW_ROOT):
+                    skipped.append({"key": rel, "why": "original path escapes the RAW root"}); continue
+                if os.path.exists(orig):
+                    # the RAW is back in place, so this holding copy is a duplicate, not a
+                    # staged original — deleting it via Purge would be a different act.
+                    skipped.append({"key": rel, "why": "original is back in the RAW tree — recover/remove by hand"})
+                    continue
+                try:
+                    sz = os.path.getsize(held)
+                    ts = int(os.path.getmtime(held))
+                except OSError as e:
+                    skipped.append({"key": rel, "why": f"unreadable in holding ({e})"}); continue
+                seen_bytes += sz
+                adopted.append({"key": rel, "orig": orig, "held": held, "jpg": jpg,
+                                "no_archive": no_archive, "bytes": sz, "ts": ts})
+        if commit:
+            for a in adopted:
+                log["staged"][a["key"]] = {k: a[k] for k in
+                                           ("orig", "held", "jpg", "no_archive", "bytes", "ts")}
+                log["staged"][a["key"]]["adopted"] = True
+            _save_log(log)
+        reasons = {}
+        for sk in skipped:
+            reasons[sk["why"]] = reasons.get(sk["why"], 0) + 1
+        return {"committed": bool(commit), "adopted": len(adopted),
+                "gb": round(seen_bytes / 1e9, 2), "already_tracked": already,
+                "skipped": len(skipped), "skipped_reasons": reasons,
+                "skipped_examples": skipped[:50],
+                "total_staged": len(log["staged"]) + (0 if commit else len(adopted))}
+
 def recover(keys=None):
     with _lock:
         log = _load_log(); back = 0; errors = []
