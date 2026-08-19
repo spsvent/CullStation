@@ -55,12 +55,34 @@ fi
 
 # 4) codesign INSIDE-OUT (never --deep): every nested Mach-O first, the app bundle last.
 #    Process substitution (not a pipe) so the loop runs in THIS shell — a failed sign aborts.
+#
+# --timestamp contacts Apple's timestamp service for EVERY binary, and that service
+# intermittently answers "The timestamp service is not available." One hiccup across ~40
+# nested Mach-Os used to abort the whole build and force a rebuild from scratch, so each
+# signature gets a few tries. Timestamping is NOT optional: notarization rejects a build
+# without a secure timestamp, so we retry rather than fall back to --timestamp=none.
+sign_retry() {   # sign_retry <file-or-bundle> [extra codesign args…]
+  local target="$1"; shift
+  local tries="${SIGN_TRIES:-4}" n=1 delay=5
+  while :; do
+    if codesign --force --timestamp "$@" --sign "$DEV_ID" "$target"; then
+      return 0
+    fi
+    if [ "$n" -ge "$tries" ]; then
+      echo "FATAL: could not sign $target after $tries attempts" >&2
+      echo "       If this says 'timestamp service is not available', check the network" >&2
+      echo "       (VPN/firewall):  nc -zv timestamp.apple.com 443" >&2
+      return 1
+    fi
+    echo "   … sign failed (attempt $n/$tries), retrying in ${delay}s: $target" >&2
+    sleep "$delay"; n=$((n + 1)); delay=$((delay * 2))
+  done
+}
+
 echo "==> signing nested binaries (hardened runtime + secure timestamp)"
 while IFS= read -r -d '' f; do
   if file "$f" | grep -q 'Mach-O'; then
-    if ! codesign --force --options runtime --timestamp --sign "$DEV_ID" "$f"; then
-      echo "FATAL: could not sign $f" >&2; exit 1
-    fi
+    sign_retry "$f" --options runtime || exit 1
   fi
 done < <(find "$APP/Contents" -type f \( -name '*.dylib' -o -name '*.so' -o -perm -u+x \) -print0)
 
@@ -73,7 +95,7 @@ for b in ffmpeg ffprobe; do
 done
 
 echo "==> signing the app bundle (with entitlements)"
-codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$DEV_ID" "$APP"
+sign_retry "$APP" --options runtime --entitlements "$ENTITLEMENTS" || exit 1
 codesign --verify --strict --verbose=2 "$APP"
 
 # 5) notarize + STAPLE the .app itself (so it works offline even if copied out of the DMG)
@@ -89,7 +111,7 @@ rm -f "$DMG"
 STAGE="$(mktemp -d)"; ditto "$APP" "$STAGE/CullStation.app"; ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "CullStation" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
 rm -rf "$STAGE"
-codesign --force --timestamp --sign "$DEV_ID" "$DMG"
+sign_retry "$DMG" || exit 1
 codesign --verify --verbose=2 "$DMG"
 
 # 7) notarize + staple the DMG too
