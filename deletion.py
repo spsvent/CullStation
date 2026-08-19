@@ -18,6 +18,47 @@ import store
 
 _lock = threading.RLock()
 
+# ---------------- live staging progress ----------------
+# Staging moves N files one at a time and can run for minutes on a NAS. The UI needs to
+# see it working, so stage() publishes a snapshot after every file. This uses its OWN lock
+# (never _lock) so /api/deletion/stage/progress answers instantly while a stage() holds
+# _lock for the whole run.
+_prog_lock = threading.Lock()
+_JOB0 = {"state": "idle", "phase": "", "total": 0, "done": 0, "staged": 0, "skipped": 0,
+         "bytes": 0, "current": "", "errors": [], "error_count": 0, "recent": [],
+         "started": 0, "finished": 0}
+_job = dict(_JOB0)
+
+def _pub(**kw):
+    with _prog_lock:
+        _job.update(kw)
+
+def stage_progress():
+    """Snapshot of the running (or last) stage job — safe to poll at any time."""
+    with _prog_lock:
+        j = dict(_job)
+    j["errors"] = list(j["errors"]); j["recent"] = list(j["recent"])
+    j["gb"] = round(j["bytes"] / 1e9, 2)
+    j["pct"] = round(100.0 * j["done"] / j["total"], 1) if j["total"] else 0.0
+    return j
+
+def stage_start(keys=None):
+    """Begin staging in a background thread and return immediately. The caller polls
+    stage_progress(). Refuses to start a second job while one is running."""
+    with _prog_lock:
+        if _job["state"] == "running":
+            return {"started": False, "reason": "a stage job is already running"}
+        _job.update(_JOB0, state="running", phase="scanning", errors=[], recent=[],
+                    started=int(time.time()))
+    threading.Thread(target=_stage_bg, args=(keys,), daemon=True).start()
+    return {"started": True}
+
+def _stage_bg(keys):
+    try:
+        stage(keys, _own_job=False)
+    except Exception as e:   # stage() already published state=error; this is the last resort
+        _pub(state="error", current="", errors=[str(e)], error_count=1, finished=int(time.time()))
+
 # ---------------- path safety ----------------
 def _contained(path, root):
     rp, rr = os.path.realpath(path), os.path.realpath(root)
@@ -140,44 +181,79 @@ def preview():
             "items": present[:500]}
 
 # ---------------- two-phase delete ----------------
-def stage(keys=None):
-    with _lock:
-        if not _same_volume(C.RAW_ROOT, C.HOLDING_ROOT):
-            return {"staged": 0, "gb": 0, "errors": ["HOLDING is on a different volume than RAW "
-                    "— a move would copy and double space on a full NAS; aborting"], "total_staged": 0}
-        d = {x["key"]: x for x in deletable() if x["exists"]}
-        sel = _keys(keys, d.keys())
-        log = _load_log(); moved = 0; bytes_ = 0; errors = []
-        for k in sel:
-            if k in log["staged"]:
-                continue
-            src = d[k]["src"]; dest = os.path.join(C.HOLDING_ROOT, k)
-            if not _contained(dest, C.HOLDING_ROOT):
-                errors.append(f"{k}: dest escapes holding"); continue
-            if os.path.exists(dest):
-                errors.append(f"{k}: holding dest already exists — skipped"); continue
-            if not _writable(src):
-                errors.append(f"{k}: source not writable (read-only mount?)"); continue
-            try:
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                shutil.move(src, dest)
-                log["staged"][k] = {"orig": src, "held": dest, "jpg": d[k]["jpg"],
-                                    "no_archive": d[k].get("no_archive", False),
-                                    "bytes": d[k]["src_bytes"], "ts": int(time.time())}
-                moved += 1; bytes_ += d[k]["src_bytes"]
-            except Exception as e:
-                errors.append(f"{k}: {e}")
-        _save_log(log)
-        return {"staged": moved, "gb": round(bytes_ / 1e9, 2), "errors": errors[:20],
-                "total_staged": len(log["staged"])}
+def stage(keys=None, _own_job=True):
+    """Move deletable RAWs into the holding tree. Publishes progress after every file so
+    the dashboard can show a bar + a live list instead of freezing on one long request."""
+    if _own_job:   # direct/synchronous call — claim the progress slot ourselves
+        _pub(**dict(_JOB0, state="running", phase="scanning", errors=[], recent=[],
+                    started=int(time.time())))
+    try:
+        with _lock:
+            if not _same_volume(C.RAW_ROOT, C.HOLDING_ROOT):
+                err = ("HOLDING is on a different volume than RAW — a move would copy and "
+                       "double space on a full NAS; aborting")
+                _pub(state="error", phase="", current="", errors=[err], error_count=1, finished=int(time.time()))
+                return {"staged": 0, "gb": 0, "errors": [err], "error_count": 1, "total_staged": 0}
+            d = {x["key"]: x for x in deletable() if x["exists"]}
+            sel = _keys(keys, d.keys())
+            log = _load_log(); moved = 0; bytes_ = 0; errors = []; done = 0; skipped = 0
+            recent = []
+            _pub(phase="staging", total=len(sel))
+            for k in sel:
+                if k in log["staged"]:
+                    done += 1; skipped += 1
+                    _pub(done=done, skipped=skipped); continue
+                _pub(current=k)
+                src = d[k]["src"]; dest = os.path.join(C.HOLDING_ROOT, k)
+                if not _contained(dest, C.HOLDING_ROOT):
+                    errors.append(f"{k}: dest escapes holding"); done += 1
+                    _pub(done=done, errors=errors[-20:], error_count=len(errors)); continue
+                if os.path.exists(dest):
+                    errors.append(f"{k}: holding dest already exists — skipped"); done += 1; skipped += 1
+                    _pub(done=done, skipped=skipped, errors=errors[-20:], error_count=len(errors)); continue
+                if not _writable(src):
+                    errors.append(f"{k}: source not writable (read-only mount?)"); done += 1
+                    _pub(done=done, errors=errors[-20:], error_count=len(errors)); continue
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    shutil.move(src, dest)
+                    log["staged"][k] = {"orig": src, "held": dest, "jpg": d[k]["jpg"],
+                                        "no_archive": d[k].get("no_archive", False),
+                                        "bytes": d[k]["src_bytes"], "ts": int(time.time())}
+                    moved += 1; bytes_ += d[k]["src_bytes"]
+                    recent.append({"key": k, "bytes": d[k]["src_bytes"]})
+                    # checkpoint the log periodically: if the process dies mid-run the moved
+                    # files are still recoverable (the log is the only recovery map).
+                    if moved % 25 == 0:
+                        _save_log(log)
+                except Exception as e:
+                    errors.append(f"{k}: {e}")
+                done += 1
+                _pub(done=done, staged=moved, bytes=bytes_, skipped=skipped,
+                     recent=recent[-200:], errors=errors[-20:], error_count=len(errors))
+            _save_log(log)
+            _pub(state="done", phase="", current="", done=done, staged=moved, bytes=bytes_,
+                 skipped=skipped, recent=recent[-200:], errors=errors[-20:],
+                 error_count=len(errors), finished=int(time.time()))
+            return {"staged": moved, "gb": round(bytes_ / 1e9, 2), "errors": errors[:20],
+                    "error_count": len(errors), "total_staged": len(log["staged"])}
+    except Exception as e:
+        _pub(state="error", phase="", current="", errors=[str(e)], error_count=1,
+             finished=int(time.time()))
+        raise
 
-def staged_list():
+def staged_list(limit=500, offset=0):
+    """Staged files, newest-staged last. `limit=0` returns them all — the dashboard asks
+    for everything when the user wants to eyeball the whole holding set before purging."""
     with _lock:
         log = _load_log()
         items = [{"key": k, **v, "held_exists": os.path.isfile(v.get("held", ""))}
                  for k, v in log["staged"].items()]
+        items.sort(key=lambda i: (i.get("ts", 0), i.get("key", "")))
+        offset = max(0, int(offset))
+        page = items[offset:] if not limit else items[offset:offset + int(limit)]
         return {"count": len(items), "gb": round(sum(i.get("bytes", 0) for i in items) / 1e9, 2),
-                "items": items[:500]}
+                "offset": offset, "listed": len(page), "items": page}
 
 def recover(keys=None):
     with _lock:

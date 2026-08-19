@@ -8,8 +8,8 @@ Local dashboard for the SkyPark NAS cull — runs on the marketing Mac mini.
   - **↻ Darker** — too bright: re-develop one stop darker and re-queue for review (each click −0.4 EV). Routed to the conversion box via a shared queue + worker; the RAW is kept until you Approve a version.
   - **⬇ RAW** — download the original to edit manually (Photoshop / darktable / RawTherapee / Resolve); marks it *manual* so the RAW is kept.
   - **🗑 Delete** — delete the RAW, no JPEG kept.
-- **Deletion** — the space payoff: a verified, **two-phase** delete of originals. Only files that are auto-verified (PASS) or human-approved are eligible. *Stage* moves them to a holding folder (recoverable); *Purge* permanently frees the space (requires typing `PURGE`).
-- **Video** — ProRes→HEVC transcode queue (hardware `hevc_videotoolbox`), pausable/resumable, with an off-hours **scheduler** and live per-file progress. Keeps the Mac awake only while encoding.
+- **Deletion** — the space payoff: a verified, **two-phase** delete of originals. Only files that are auto-verified (PASS) or human-approved are eligible. *Stage* moves them to a holding folder (recoverable) and runs in the background with a live progress bar, a running count/size, the file currently moving and a feed of what's been moved; *Purge* permanently frees the space (requires typing `PURGE`). Everything staged is listed in a table (path, size, when) with a filter box and per-row **Recover**, so you can check the holding set before purging.
+- **Video** — ProRes→HEVC transcode queue (hardware `hevc_videotoolbox`), pausable/resumable, with an off-hours **scheduler** and live per-file progress. Keeps the Mac awake only while encoding. A clip whose extra tracks the `.mov` muxer refuses is retried with a narrower stream map (and, last resort, re-encoded audio) instead of being written off — whichever fallback was used is reported. Anything that still fails is listed with its full ffmpeg message plus **Diagnose** (ffprobe stream layout) and **Retry**; the original is never touched.
 
 ## Run on the Mac
 

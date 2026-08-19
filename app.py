@@ -241,10 +241,22 @@ def review_bulk(body: dict = Body(...)):
 def del_preview(): return deletion.preview()
 
 @app.get("/api/deletion/staged")
-def del_staged(): return deletion.staged_list()
+def del_staged(limit: int = 500, offset: int = 0):
+    """limit=0 → every staged file (the UI's 'load all' path)."""
+    return deletion.staged_list(max(0, limit), offset)
 
 @app.post("/api/deletion/stage", dependencies=[Depends(csrf_guard)])
 def del_stage(body: dict = Body(default={})): return deletion.stage(body.get("keys"))
+
+@app.post("/api/deletion/stage/start", dependencies=[Depends(csrf_guard)])
+def del_stage_start(body: dict = Body(default={})):
+    """Non-blocking staging: returns at once, the UI polls /api/deletion/stage/progress
+    so a multi-minute NAS move shows a live bar instead of a frozen button."""
+    r = deletion.stage_start(body.get("keys"))
+    return {**r, "progress": deletion.stage_progress()}
+
+@app.get("/api/deletion/stage/progress")
+def del_stage_progress(): return deletion.stage_progress()
 
 @app.post("/api/deletion/recover", dependencies=[Depends(csrf_guard)])
 def del_recover(body: dict = Body(default={})): return deletion.recover(body.get("keys"))
@@ -266,6 +278,22 @@ def video_config(body: dict = Body(...)): return video.set_cfg(body or {})
 def video_keep(body: dict = Body(...)):
     return video.set_keep(body.get("rel"), bool(body.get("keep")))
 
+@app.get("/api/video/failed")
+def video_failed(): return video.failed()
+
+@app.get("/api/video/fallbacks")
+def video_fallbacks(): return video.fallbacks()
+
+@app.get("/api/video/diagnose")
+def video_diagnose(rel: str):
+    """ffprobe a source clip (path-contained) so a FAIL can be explained, not guessed at."""
+    return video.diagnose(rel)
+
+@app.post("/api/video/retry", dependencies=[Depends(csrf_guard)])
+def video_retry(body: dict = Body(...)):
+    return video.retry(body.get("rel"))
+
+# NOTE: keep this catch-all LAST — it would otherwise swallow /api/video/retry.
 @app.post("/api/video/{action}", dependencies=[Depends(csrf_guard)])
 def video_control(action: str):
     if action == "start": video.start()
