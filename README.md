@@ -56,3 +56,16 @@ Full builder + end-user steps (signing, notarization, login auto-start): **`pack
 ## Files
 
 `app.py` (FastAPI routes) · `store.py` (manifest cache, reviews, free-space/ETA) · `video.py` (transcode worker) · `deletion.py` (staged verified-delete) · `config.py` · `static/index.html` (dashboard) · `run.sh`.
+
+## Ownership and GitHub workflow
+
+Owner: **Justin Nunn (`@skyparkjustin`), SkyPark IT/AV**.
+Canonical repository: [spsvent/CullStation](https://github.com/spsvent/CullStation).
+Default branch: `master`; work in a separate issue branch.
+
+Read [the clone setup and PR workflow](docs/GITHUB-WORKFLOW.md) and enable the
+reviewed identity guards with `sh tools/install-git-hooks.sh` (Python 3 required).
+Preserve any existing hooks. Leave notes in [docs/handoffs](docs/handoffs/README.md).
+
+This baseline does not enable server-side branch protection, rotate secrets, or
+verify deployment health. Those remain tracked in spsvent/SkyPark#101.
