@@ -1,0 +1,9 @@
+---
+description: SkyPark repository instructions for every agent session
+alwaysApply: true
+---
+
+At the start of every repository session, including read-only inspection and review, read @AGENTS.md in full and applicable nested instructions.
+Follow its Required agent startup checklist, work identity, PR/review, secrets,
+verification and handoff rules. If the file cannot be loaded, stop before modifying
+this repository. Do not maintain a separate policy in this wrapper.

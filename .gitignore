@@ -16,3 +16,21 @@ _video_state.json
 _video_config.json
 _video_keep.json
 _deletion_log.json
+
+# SkyPark runtime credentials and local artifacts
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+node_modules/
+__pycache__/
+# Placeholder-only examples are safe to version.
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+
+# Node dependencies in this workspace
+node_modules/
